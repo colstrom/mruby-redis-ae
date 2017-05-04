@@ -25,8 +25,7 @@ mrb_aeCreateEventLoop(mrb_state *mrb, mrb_value self)
     mrb_iv_set(mrb, self, mrb_intern_lit(mrb, "callback_data"), callback_data);
     loop->mrb = mrb;
     loop->callback_data = callback_data;
-  }
-  else {
+  } else {
     mrb_sys_fail(mrb, "aeCreateEventLoop");
   }
 
@@ -41,22 +40,19 @@ mrb_aeStop(mrb_state *mrb, mrb_value self)
   return mrb_nil_value();
 }
 
-static inline void
+MRB_INLINE void
 mrb_aeFileProc(aeEventLoop *eventLoop, int fd, void *clientData, int mask)
 {
-  mrb_state *mrb = eventLoop->mrb;
-  int arena_index = mrb_gc_arena_save(mrb);
   mrb_ae_file_callback_data *file_callback_data = (mrb_ae_file_callback_data *) clientData;
 
   mrb_value argv[2];
   argv[0] = file_callback_data->sock;
   argv[1] = mrb_fixnum_value(mask);
-  mrb_yield_argv(mrb, file_callback_data->block, 2, argv);
-
-  mrb_gc_arena_restore(mrb, arena_index);
+  mrb_assert(mrb_type(file_callback_data->block) == MRB_TT_PROC);
+  mrb_yield_argv(eventLoop->mrb, file_callback_data->block, 2, argv);
 }
 
-static inline mrb_value
+MRB_INLINE mrb_value
 mrb_ae_create_file_callback_data(mrb_state *mrb, mrb_value self, mrb_value sock, int fd, int mask, mrb_value block)
 {
   struct RBasic *callback_data_obj = mrb_obj_alloc(mrb, MRB_TT_DATA, mrb_class_get_under(mrb, mrb_class(mrb, self), "FileCallbackData"));
@@ -83,15 +79,14 @@ mrb_aeCreateFileEvent(mrb_state *mrb, mrb_value self)
     mrb_raise(mrb, E_ARGUMENT_ERROR, "mask doesn't fit into int");
   }
 
-  if (mrb_nil_p(block)) {
+  if (mrb_type(block) != MRB_TT_PROC) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
   }
 
   int fd = 0;
 
   if (!mrb_nil_p(sock)) {
-    mrb_value fd_val = mrb_Integer(mrb, sock);
-    mrb_int fd_mrb = mrb_fixnum(fd_val);
+    mrb_int fd_mrb = mrb_fixnum(mrb_Integer(mrb, sock));
     if (fd_mrb < INT_MIN||fd_mrb > INT_MAX) {
       mrb_raise(mrb, E_ARGUMENT_ERROR, "fd doesn't fit into int");
     }
@@ -104,15 +99,14 @@ mrb_aeCreateFileEvent(mrb_state *mrb, mrb_value self)
   int rc = aeCreateFileEvent((aeEventLoop *) DATA_PTR(self), fd, mask, mrb_aeFileProc, DATA_PTR(mrb_ae_callback_data));
   if (rc == AE_OK) {
     mrb_ary_push(mrb, mrb_iv_get(mrb, self, mrb_intern_lit(mrb, "callback_data")), mrb_ae_callback_data);
-  }
-  else {
+  } else {
     mrb_sys_fail(mrb, "aeCreateFileEvent");
   }
 
   return mrb_ae_callback_data;
 }
 
-static inline void
+MRB_INLINE void
 mrb_ae_delete_file_callback_data(mrb_state *mrb, mrb_value mrb_ae_callback_data, mrb_value self)
 {
   mrb_iv_remove(mrb, mrb_ae_callback_data, mrb_intern_lit(mrb, "@sock"));
@@ -134,26 +128,22 @@ mrb_aeDeleteFileEvent(mrb_state *mrb, mrb_value self)
 
   if (mrb_type(mrb_ae_file_callback_data) == MRB_TT_DATA && DATA_TYPE(mrb_ae_file_callback_data) == &mrb_ae_file_callback_data_type) {
     mrb_ae_delete_file_callback_data(mrb, mrb_ae_file_callback_data, self);
-  }
-  else {
+  } else {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "expected Ae File callback data");
   }
 
   return mrb_nil_value();
 }
 
-static inline int
+MRB_INLINE int
 mrb_aeTimeProc(aeEventLoop *eventLoop, long long id, void *clientData)
 {
   mrb_state *mrb = eventLoop->mrb;
   mrb_ae_time_callback_data *time_callback_data = (mrb_ae_time_callback_data *) clientData;
-  int arena_index = mrb_gc_arena_save(mrb);
 
+  mrb_assert(mrb_type(time_callback_data->block) == MRB_TT_PROC);
   mrb_value ret = mrb_yield(mrb, time_callback_data->block, mrb_fixnum_value(id));
-  ret = mrb_Integer(mrb, ret);
-  mrb_int milliseconds = mrb_fixnum(ret);
-
-  mrb_gc_arena_restore(mrb, arena_index);
+  mrb_int milliseconds = mrb_fixnum(mrb_Integer(mrb, ret));
 
   if (milliseconds < INT_MIN||milliseconds > INT_MAX) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "milliseconds doesn't fit into int");
@@ -162,28 +152,22 @@ mrb_aeTimeProc(aeEventLoop *eventLoop, long long id, void *clientData)
   return milliseconds;
 }
 
-static inline void
+MRB_INLINE void
 mrb_aeEventFinalizerProc(aeEventLoop *eventLoop, void *clientData)
 {
-  mrb_state *mrb = eventLoop->mrb;
   mrb_ae_time_callback_data *time_callback_data = (mrb_ae_time_callback_data *) clientData;
-  int arena_index = mrb_gc_arena_save(mrb);
 
   mrb_assert (mrb_type(time_callback_data->finalizer) == MRB_TT_PROC);
-  mrb_yield_argv(mrb, time_callback_data->finalizer, 0, NULL);
-
-  mrb_gc_arena_restore(mrb, arena_index);
+  mrb_yield_argv(eventLoop->mrb, time_callback_data->finalizer, 0, NULL);
 }
 
-static inline mrb_value
+MRB_INLINE mrb_value
 mrb_ae_create_time_callback_data(mrb_state *mrb, mrb_value self, mrb_value finalizer, mrb_value block)
 {
-  struct RBasic *callback_data_obj = mrb_obj_alloc(mrb, MRB_TT_DATA, mrb_class_get_under(mrb, mrb_class(mrb, self), "TimeCallbackData"));
-
-  return mrb_funcall_with_block(mrb, mrb_obj_value((struct RObject*)callback_data_obj), mrb_intern_lit(mrb, "initialize"), 1, &finalizer, block);
+  return mrb_funcall_with_block(mrb, mrb_obj_value((struct RObject*)mrb_obj_alloc(mrb, MRB_TT_DATA, mrb_class_get_under(mrb, mrb_class(mrb, self), "TimeCallbackData"))), mrb_intern_lit(mrb, "initialize"), 1, &finalizer, block);
 }
 
-static inline void
+MRB_INLINE void
 mrb_ae_push_time_callback_data(mrb_state *mrb, mrb_value mrb_ae_callback_data, long long id, mrb_value self)
 {
   mrb_iv_set(mrb, mrb_ae_callback_data, mrb_intern_lit(mrb, "@id"), mrb_fixnum_value(id));
@@ -203,7 +187,7 @@ mrb_aeCreateTimeEvent(mrb_state *mrb, mrb_value self)
     mrb_raise(mrb, E_ARGUMENT_ERROR, "milliseconds doesn't fit into long long");
   }
 
-  if (mrb_nil_p(block)) {
+  if (mrb_type(block) != MRB_TT_PROC) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
   }
 
@@ -218,21 +202,20 @@ mrb_aeCreateTimeEvent(mrb_state *mrb, mrb_value self)
   long long id = aeCreateTimeEvent((aeEventLoop *) DATA_PTR(self), milliseconds,
           mrb_aeTimeProc, DATA_PTR(mrb_ae_callback_data), finalizerProc);
 
-  if (id > MRB_INT_MAX) {
-    mrb_raise(mrb, E_RUNTIME_ERROR, "id doesn't fit into mrb_int");
-  }
-
   if (id != AE_ERR) {
+    if (MRB_INT_MAX < id) {
+      aeDeleteTimeEvent((aeEventLoop *) DATA_PTR(self), id);
+      mrb_raise(mrb, E_RUNTIME_ERROR, "id doesn't fit into mrb_int");
+    }
     mrb_ae_push_time_callback_data(mrb, mrb_ae_callback_data, id, self);
-  }
-  else {
+  } else {
     mrb_sys_fail(mrb, "aeCreateTimeEvent");
   }
 
   return mrb_ae_callback_data;
 }
 
-static inline void
+MRB_INLINE void
 mrb_ae_delete_time_callback_data(mrb_state *mrb, mrb_value mrb_ae_callback_data, mrb_value self)
 {
   mrb_iv_remove(mrb, mrb_ae_callback_data, mrb_intern_lit(mrb, "@finalizer"));
@@ -253,8 +236,7 @@ mrb_aeDeleteTimeEvent(mrb_state *mrb, mrb_value self)
 
   if (mrb_type(mrb_ae_callback_data) == MRB_TT_DATA && DATA_TYPE(mrb_ae_callback_data) == &mrb_ae_time_callback_data_type) {
     mrb_ae_delete_time_callback_data(mrb, mrb_ae_callback_data, self);
-  }
-  else {
+  } else {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "expected Ae Time callback data");
   }
 
@@ -305,15 +287,11 @@ mrb_aeMain(mrb_state *mrb, mrb_value self)
   return mrb_nil_value();
 }
 
-static inline void
+MRB_INLINE void
 mrb_aeBeforeSleepProc(aeEventLoop *eventLoop)
 {
-  mrb_state *mrb = eventLoop->mrb;
-  int arena_index = mrb_gc_arena_save(mrb);
-
-  mrb_yield_argv(mrb, eventLoop->before_sleep_block, 0, NULL);
-
-  mrb_gc_arena_restore(mrb, arena_index);
+  mrb_assert(mrb_type(eventLoop->before_sleep_block) == MRB_TT_PROC);
+  mrb_yield_argv(eventLoop->mrb, eventLoop->before_sleep_block, 0, NULL);
 }
 
 static mrb_value
@@ -323,7 +301,7 @@ mrb_aeSetBeforeSleepProc(mrb_state *mrb, mrb_value self)
 
   mrb_get_args(mrb, "&", &block);
 
-  if (mrb_nil_p(block)) {
+  if (mrb_type(block) != MRB_TT_PROC) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
   }
 
@@ -369,7 +347,7 @@ mrb_ae_file_callback_data_init(mrb_state *mrb, mrb_value self)
 {
   mrb_value sock;
   mrb_int fd, mask;
-  mrb_value block;
+  mrb_value block = mrb_nil_value();
 
   mrb_get_args(mrb, "oii&", &sock, &fd, &mask, &block);
 
@@ -377,7 +355,7 @@ mrb_ae_file_callback_data_init(mrb_state *mrb, mrb_value self)
   mrb_iv_set(mrb, self, mrb_intern_lit(mrb, "@mask"), mrb_fixnum_value(mask));
   mrb_iv_set(mrb, self, mrb_intern_lit(mrb, "@block"), block);
 
-  mrb_ae_file_callback_data *file_callback_data = (mrb_ae_file_callback_data *) mrb_malloc(mrb, sizeof(mrb_ae_file_callback_data));
+  mrb_ae_file_callback_data *file_callback_data = (mrb_ae_file_callback_data *) mrb_realloc(mrb, DATA_PTR(self), sizeof(mrb_ae_file_callback_data));
   mrb_data_init(self, file_callback_data, &mrb_ae_file_callback_data_type);
   file_callback_data->sock = sock;
   file_callback_data->fd = fd;
@@ -390,8 +368,8 @@ mrb_ae_file_callback_data_init(mrb_state *mrb, mrb_value self)
 static mrb_value
 mrb_ae_time_callback_data_init(mrb_state *mrb, mrb_value self)
 {
-  mrb_value finalizer;
-  mrb_value block;
+  mrb_value finalizer = mrb_nil_value();
+  mrb_value block = mrb_nil_value();
 
   mrb_get_args(mrb, "|o&", &finalizer, &block);
 
@@ -440,6 +418,7 @@ mrb_mruby_redis_ae_gem_init(mrb_state* mrb)
   mrb_define_method(mrb, ae_class, "process_events", mrb_aeProcessEvents, MRB_ARGS_OPT(1));
   mrb_define_method(mrb, ae_class, "wait", mrb_aeWait, MRB_ARGS_OPT(3));
   mrb_define_method(mrb, ae_class, "main", mrb_aeMain, MRB_ARGS_NONE());
+  mrb_define_alias (mrb, ae_class, "run", "main");
   mrb_define_method(mrb, ae_class, "before_sleep", mrb_aeSetBeforeSleepProc, MRB_ARGS_BLOCK());
   mrb_define_method(mrb, ae_class, "set_size", mrb_aeGetSetSize, MRB_ARGS_NONE());
   mrb_define_method(mrb, ae_class, "set_size=", mrb_aeResizeSetSize, MRB_ARGS_REQ(1));
